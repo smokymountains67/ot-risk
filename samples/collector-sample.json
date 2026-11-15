@@ -1,0 +1,10 @@
+{
+  "schema": "otrisk.collector.v1",
+  "collector": { "id": "plant2-sensor-01", "method": "passive", "version": "0.0-spec" },
+  "site": "s2",
+  "collectedAt": "2026-11-14T22:00:00Z",
+  "assets": [
+    { "ip": "10.20.20.10", "mac": "00:1B:1B:10:20:30", "vendor": "Siemens", "model": "CPU 1515-2 PN", "firmware": "2.9.4", "type": "PLC", "purdue": "L1", "zone": "Weld Cell", "protocols": ["S7comm-plus"], "firstSeen": "2026-10-01T12:00:00Z", "lastSeen": "2026-11-14T21:59:00Z", "cves": [] },
+    { "ip": "10.20.20.31", "mac": "00:E0:E4:AA:00:31", "vendor": "FANUC", "model": "R-30iB Plus", "firmware": "V9.40", "type": "Robot controller", "purdue": "L1", "zone": "Weld Cell", "protocols": ["EtherNet/IP"], "cves": [] }
+  ]
+}

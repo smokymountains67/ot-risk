@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" args="nmap -sT -Pn -n -p 102,502,44818,47808,3389,445,80,443 --script enip-info,s7-info,modbus-discover --scan-delay 1s -oX plant2.xml 10.20.10.0/24" start="1762790400" version="7.95" xmloutputversion="1.05">
+<host><status state="up" reason="syn-ack"/><address addr="10.20.10.10" addrtype="ipv4"/><address addr="00:1D:9C:11:22:33" addrtype="mac" vendor="Rockwell Automation"/>
+<ports><port protocol="tcp" portid="44818"><state state="open"/><service name="EtherNet-IP-2"/>
+<script id="enip-info" output="&#xa;  type: Programmable Logic Controller (14)&#xa;  Vendor: Rockwell Automation/Allen-Bradley (1)&#xa;  Product Name: 1756-L71/B LOGIX5571&#xa;  Serial Number: 0x00c0ffee&#xa;  Product Code: 94&#xa;  Revision: 20.54&#xa;  Device IP: 10.20.10.10">
+<elem key="type">Programmable Logic Controller (14)</elem><elem key="Vendor">Rockwell Automation/Allen-Bradley (1)</elem><elem key="Product Name">1756-L71/B LOGIX5571</elem><elem key="Revision">20.54</elem></script></port></ports></host>
+<host><status state="up" reason="syn-ack"/><address addr="10.20.10.12" addrtype="ipv4"/><address addr="00:1D:9C:44:55:66" addrtype="mac" vendor="Rockwell Automation"/>
+<ports><port protocol="tcp" portid="44818"><state state="open"/><service name="EtherNet-IP-2"/>
+<script id="enip-info" output="&#xa;  type: Communications Adapter (12)&#xa;  Vendor: Rockwell Automation/Allen-Bradley (1)&#xa;  Product Name: 1756-EN2TR/C&#xa;  Revision: 11.002">
+<elem key="type">Communications Adapter (12)</elem><elem key="Vendor">Rockwell Automation/Allen-Bradley (1)</elem><elem key="Product Name">1756-EN2TR/C</elem><elem key="Revision">11.002</elem></script></port>
+<port protocol="tcp" portid="80"><state state="open"/><service name="http" product="GoAhead WebServer"/></port></ports></host>
+<host><status state="up" reason="syn-ack"/><address addr="10.20.10.50" addrtype="ipv4"/><address addr="00:1B:1B:AA:BB:CC" addrtype="mac" vendor="Siemens AG"/>
+<ports><port protocol="tcp" portid="102"><state state="open"/><service name="iso-tsap"/>
+<script id="s7-info" output="&#xa;  Module: 6ES7 214-1AG40-0XB0 &#xa;  Basic Hardware: 6ES7 214-1AG40-0XB0 &#xa;  Version: 4.4.0&#xa;  System Name: S71200/ET200MP station_1&#xa;  Module Type: CPU 1214C DC/DC/DC&#xa;  Plant Identification: OVEN-BURNER"/></port></ports></host>
+<host><status state="up" reason="syn-ack"/><address addr="10.20.10.60" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="502"><state state="open"/><service name="modbus"/><script id="modbus-discover" output="&#xa;  sid 0x1: &#xa;    Slave ID data: \xFA\xFFPM5560&#xa;    Device identification: Schneider Electric PM5560 Power Meter"/></port></ports></host>
+<host><status state="up" reason="syn-ack"/><address addr="10.20.10.80" addrtype="ipv4"/><hostnames><hostname name="pl-ews-02" type="PTR"/></hostnames>
+<ports><port protocol="tcp" portid="3389"><state state="open"/><service name="ms-wbt-server" product="Microsoft Terminal Services"/></port>
+<port protocol="tcp" portid="445"><state state="open"/><service name="microsoft-ds" product="Microsoft Windows 7 - 10 microsoft-ds"/></port></ports>
+<os><osmatch name="Microsoft Windows 7 SP1" accuracy="96"/></os></host>
+<host><status state="down" reason="no-response"/><address addr="10.20.10.99" addrtype="ipv4"/></host>
+</nmaprun>

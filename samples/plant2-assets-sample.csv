@@ -1,0 +1,6 @@
+Asset Name,IP Address,MAC Address,Vendor,Model,Firmware Version,Device Type,Purdue Level,Zone,Owner,CVE
+LP-LASER-03,10.20.30.23,00:0E:8C:01:02:03,Trumpf,TruLaser 3030 control PC,Win10 LTSC 2019,CNC controller,Level 2,Laser/Punch,Maintenance,
+LP-PLC-02,10.20.30.10,,Rockwell Automation,CompactLogix 5380,33.015,PLC,L1,Laser/Punch,Controls Eng.,
+UT-AIR-02,10.20.40.12,,Unitronics,Vision V350,9.8.40,PLC/HMI,L1,Utilities,Facilities,CVE-2023-6448
+WC-SW-01,10.20.20.2,,Moxa,EDS-408A,3.8,Network switch,L2,Weld Cell,Controls Eng.,
+OPS-PATCH-01,10.20.60.30,,Microsoft,WSUS on Windows Server 2019,2019,Patch server,Level 3,Operations,OT/IT,
