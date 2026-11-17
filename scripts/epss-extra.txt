@@ -1,0 +1,10 @@
+# Extra CVEs whose EPSS should always be in data/epss.json (one per line)
+CVE-2021-22681
+CVE-2022-1161
+CVE-2023-3595
+CVE-2020-15782
+CVE-2016-8562
+CVE-2023-6448
+CVE-2019-0708
+CVE-2017-0144
+CVE-2021-44228
