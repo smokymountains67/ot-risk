@@ -1,16 +1,16 @@
 // Fictional sample plant. Company, sites, assets, IPs, owners and dollar figures are invented.
-// CVE IDs, CVSS (NVD), KEV membership and EPSS values are real as of 15 Nov 2026.
+// CVE IDs, CVSS (NVD / CISA advisories), KEV membership and EPSS values are real as of 15–16 Nov 2026 (nightly feeds keep KEV/EPSS current).
 window.SAMPLE_DATA = function () {
   const A = (id, siteId, name, type, vendor, model, firmware, ip, purdue, zone, crit, extra = {}) =>
     Object.assign({ id, siteId, name, type, vendor, model, firmware, ip, mac: '', purdue, zone, crit, owner: '', notes: '', source: 'sample', lastSeen: '2026-11-10' }, extra);
   const V = (id, assetId, cve, title, cvss, kev, epss, reach, rcis, status, extra = {}) =>
     Object.assign({ id, assetId, cve, title, cvss, kev, epss, publicExploit: false, reach, rcis, status, found: '2026-11-03', owner: '', decision: '', compensating: '', fair: null }, extra);
-  return {
+  const d = {
     version: 1,
     company: { name: 'Northfield Air Systems (fictional)', industry: 'HVAC equipment manufacturing – fans, dampers, energy-recovery units', hq: 'Northfield, USA', contact: '' },
     sites: [
-      { id: 's2', name: 'Plant 2 – Fabrication & Paint', location: 'Northfield, USA', headcount: 410, notes: 'Powder-coat paint line with gas cure oven, 8 laser/punch cells, robotic weld area.', maturity: [2, 2, 2, 2, 2, 2, 2, 2, 1] },
-      { id: 's1', name: 'Plant 1 – Fan Assembly', location: 'Riverton, USA', headcount: 260, notes: 'Final assembly and balancing. Flat network.', maturity: [1, 1, 1, 1, 2, 2, 1, 2, 1] },
+      { id: 's2', name: 'Plant 2 – Fabrication & Paint', location: 'Northfield, USA', region: 'Central Region', headcount: 410, notes: 'Powder-coat paint line with gas cure oven, 8 laser/punch cells, robotic weld area.', maturity: [2, 2, 2, 2, 2, 2, 2, 2, 1] },
+      { id: 's1', name: 'Plant 1 – Fan Assembly', location: 'Riverton, USA', region: 'East Region', headcount: 260, notes: 'Final assembly and balancing. Flat network.', maturity: [1, 1, 1, 1, 2, 2, 1, 2, 1] },
     ],
     activeSiteId: 's2',
     assets: [
@@ -44,8 +44,37 @@ window.SAMPLE_DATA = function () {
       V('v5', 'a7', 'CVE-2016-8562', 'SIMATIC CP 1543-1: improper privilege management', 7.5, true, 0.0361, 2, 1.0, 'Open'),
       V('v6', 'a10', 'CVE-2023-6448', 'Unitronics Vision: default administrative password', 9.8, true, 0.0209, 3, 1.0, 'Open', { decision: 'Change default password; remove cellular modem or put behind vendor VPN.' }),
       V('v7', 'a11', 'CVE-2019-0708', 'BlueKeep – RDP pre-auth remote code execution', 9.8, true, 0.99999, 3, 1.0, 'Open', { owner: 'OT/IT', fair: { lef: [0.05, 0.15, 0.4], lm: [40000, 120000, 600000] } }),
-      V('v8', 'a11', 'CVE-2017-0144', 'EternalBlue – SMBv1 remote code execution', 8.8, true, 0.9923, 2, 1.0, 'Open'),
+      V('v8', 'a11', 'CVE-2017-0144', 'EternalBlue – SMBv1 remote code execution', 8.8, true, 0.9923, 2, 1.0, 'Open', { reachOverride: true, decision: 'Reach set manually to 2: SMB is blocked at the OT boundary even though the host is IT-routable.' }),
       V('v9', 'a14', 'CVE-2021-44228', 'Log4Shell – Apache Log4j2 JNDI remote code execution', 10.0, true, 0.99999, 2, 1.2, 'Remediated', { decision: 'Upgraded to log4j 2.17.1 on 2026-11-08.' }),
+    V('v10', 'a19', 'CVE-2021-22659', 'MicroLogix 1400: crafted Modbus packet can fault the controller (ICSA-21-033-01)', 8.1, false, 0.01795, 2, 1.0, 'Open', { found: '2026-11-12', owner: 'Plant 1 Maint.' }),
+    V('v11', 'a19', 'CVE-2022-3166', 'MicroLogix 1100/1400 web server denial of service (ICSA-22-354-04)', 7.5, false, 0.00723, 2, 1.0, 'Open', { found: '2026-11-12', owner: 'Plant 1 Maint.' }),
+    V('v12', 'a21', 'CVE-2020-36177', 'PanelView 800: third-party library buffer overflow (ICSA-23-131-14)', 9.8, false, 0.03567, 2, 1.0, 'Open', { found: '2026-11-12' }),
     ],
   };
+  // Lines and network connectivity (fictional). gateway may be another asset's id or free text.
+  const C = (type, method, gateway, extra = {}) => Object.assign({ type, method, gateway, switchPort: '', vlan: '', remote: '', firewall: 'unknown', fwNote: '', protocols: [], verified: '2026-11-05', guessed: [] }, extra);
+  const conn = {
+    a1: C('plant', 'ethernet', 'a2', { vlan: 'VLAN 110 Paint', protocols: ['EtherNet/IP (CIP)'], firewall: 'no' }),
+    a2: C('plant', 'ethernet', 'SW-PAINT-01', { switchPort: 'Gi1/0/2', vlan: 'VLAN 110 Paint', protocols: ['EtherNet/IP (CIP)', 'HTTP/HTTPS'], firewall: 'yes', fwNote: 'DMZ-FW-01 policy 14: CIP only from HMI + EWS' }),
+    a3: C('plant', 'ethernet', 'SW-PAINT-01', { switchPort: 'Gi1/0/5', vlan: 'VLAN 110 Paint', protocols: ['EtherNet/IP (CIP)', 'VNC'], firewall: 'no' }),
+    a4: C('cell', 'ethernet', 'a1', { vlan: 'Oven cell (unrouted)', protocols: ['Modbus/TCP'], firewall: 'no' }),
+    a5: C('plant', 'ethernet', 'a2', { vlan: 'VLAN 110 Paint', protocols: ['EtherNet/IP (CIP)'], firewall: 'no' }),
+    a6: C('plant', 'ethernet', 'SW-WELD-01', { switchPort: 'Fa0/1', vlan: 'VLAN 120 Weld', protocols: ['PROFINET', 'S7comm', 'HTTP/HTTPS'], firewall: 'no' }),
+    a7: C('plant', 'ethernet', 'SW-WELD-01', { switchPort: 'Fa0/2', vlan: 'VLAN 120 Weld', protocols: ['S7comm', 'HTTP/HTTPS', 'SNMP'], firewall: 'no' }),
+    a8: C('cell', 'ethernet', 'a6', { vlan: 'Robot cell (unrouted)', protocols: ['PROFINET'], firewall: 'no' }),
+    a9: C('plant', 'ethernet', 'SW-LASER-01', { vlan: 'VLAN 130 Laser/Punch', protocols: ['EtherNet/IP (CIP)'], verified: '' }),
+    a10: C('cellular', 'ethernet', '', { remote: 'Vendor cellular modem (always on)', protocols: ['Modbus/TCP'], firewall: 'no' }),
+    a11: C('it', 'ethernet', 'a13', { vlan: 'VLAN 150 Supervisory', protocols: ['RDP', 'SMB', 'EtherNet/IP (CIP)'], firewall: 'no', fwNote: 'Flat route to office VLANs' }),
+    a12: C('plant', 'ethernet', 'a13', { vlan: 'VLAN 150 Supervisory', protocols: ['EtherNet/IP (CIP)', 'OPC UA', 'RDP'], firewall: 'yes', fwNote: 'RDP only from DMZ-JUMP-01' }),
+    a13: C('plant', 'ethernet', 'a17', { switchPort: 'Te1/1/1 uplink', vlan: 'VLAN 150 Supervisory', protocols: ['SNMP', 'SSH'], firewall: 'yes' }),
+    a14: C('it', 'ethernet', 'a17', { vlan: 'VLAN 160 Operations', protocols: ['OPC UA', 'HTTP/HTTPS'], firewall: 'yes', fwNote: 'DMZ-FW-01 allows the reporting server only' }),
+    a15: C('it', 'ethernet', 'a17', { vlan: 'VLAN 160 Operations', protocols: ['HTTP/HTTPS'], firewall: 'yes', fwNote: 'ERP integration ports only' }),
+    a16: C('it', 'ethernet', 'a17', { vlan: 'DMZ 199', remote: 'Corporate VPN + MFA (vendor sessions)', protocols: ['RDP'], firewall: 'yes' }),
+    a17: C('it', 'ethernet', 'Corporate core', { protocols: ['HTTP/HTTPS', 'SSH'], firewall: 'yes' }),
+    a19: C('plant', 'ethernet', 'SW-ASSY-01', { vlan: 'Flat 10.30.10.0/24', protocols: ['EtherNet/IP (CIP)'], remote: 'TeamViewer on FA-BAL-PC', firewall: 'no', verified: '' }),
+    a20: C('vendor', 'ethernet', 'SW-ASSY-01', { vlan: 'Flat 10.30.10.0/24', remote: 'TeamViewer (balancer vendor support)', protocols: ['RDP', 'VNC'], firewall: 'no' }),
+  };
+  const lines = { a1: 'Powder coat line 1', a2: 'Powder coat line 1', a3: 'Powder coat line 1', a4: 'Powder coat line 1', a5: 'Powder coat line 1', a6: 'Robotic weld cell', a7: 'Robotic weld cell', a8: 'Robotic weld cell', a9: 'Laser/punch cell 3', a10: 'Utilities', a19: 'Fan assembly line A', a20: 'Fan assembly line A', a21: 'Fan assembly line A' };
+  d.assets.forEach(a => { a.line = lines[a.id] || ''; if (conn[a.id]) a.conn = conn[a.id]; });
+  return d;
 };

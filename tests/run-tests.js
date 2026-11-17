@@ -98,6 +98,48 @@ t('controller gets maintenance-window caveat + protection control', () => {
   assert.ok(!G.isController({ type: 'Engineering workstation', purdue: 'L2' }));
 });
 
+// ---- connectivity → reachability ----
+const Cn = require(path.join(root, 'js/connectivity.js'));
+const asset = (conn) => ({ crit: { op: 3, sa: 2, rd: 3, rc: 2 }, purdue: 'L1', conn });
+const V = { cvss: 9.8, kev: true, epss: 0.6, reach: 2, rcis: 1.2 };
+t('air-gapped lowers R to 1 with reason', () => { const r = S.score(asset({ type: 'airgap' }), V); assert.strictEqual(r.reach, 1); assert.match(r.reachWhy, /air-gapped/i); assert.strictEqual(r.reachSrc, 'connectivity'); });
+t('plant OT network = R 2 (worked example unchanged 57.8)', () => { const r = S.score(asset({ type: 'plant' }), V); assert.strictEqual(r.reach, 2); assert.strictEqual(r.score, 57.8); });
+t('IT-routable raises R to 3', () => { assert.strictEqual(S.score(asset({ type: 'it' }), V).reach, 3); });
+t('IT-routed behind firewall/ACL = R 2', () => { const r = S.score(asset({ type: 'it', firewall: 'yes', fwNote: 'rule 7' }), V); assert.strictEqual(r.reach, 2); assert.match(r.reachWhy, /firewall/); });
+t('internet / cellular / vendor = R 3 and exposed', () => { for (const ty of ['internet', 'cellular', 'vendor']) { assert.strictEqual(S.score(asset({ type: ty }), V).reach, 3); assert.ok(S.connReach({ type: ty }).exposed); } });
+t('remote path on plant network raises R to 3', () => { const r = S.score(asset({ type: 'plant', remote: 'TeamViewer' }), V); assert.strictEqual(r.reach, 3); assert.match(r.reachWhy, /TeamViewer/); });
+t('remote "none" does not raise R', () => { assert.strictEqual(S.score(asset({ type: 'plant', remote: 'none' }), V).reach, 2); });
+t('USB-only method = R 1', () => { assert.strictEqual(S.score(asset({ type: 'plant', method: 'usb' }), V).reach, 1); });
+t('manual override wins over connectivity', () => { const r = S.score(asset({ type: 'it' }), Object.assign({}, V, { reach: 2, reachOverride: true })); assert.strictEqual(r.reach, 2); assert.strictEqual(r.reachSrc, 'manual'); });
+t('no connectivity falls back to vulnerability reach', () => { assert.strictEqual(S.score(asset(undefined), Object.assign({}, V, { reach: 3 })).reach, 3); });
+t('import prefill: private IP + ports -> plant, protocols, all marked guessed', () => {
+  const c = Cn.fromImport({ ip: '10.20.10.10', purdue: 'L1', ports: [{ port: 44818 }, { port: 502 }, { port: 102 }, { port: 47808 }] });
+  assert.strictEqual(c.type, 'plant'); assert.deepStrictEqual(c.protocols, ['EtherNet/IP (CIP)', 'Modbus/TCP', 'S7comm', 'BACnet/IP']);
+  for (const k of ['type', 'protocols', 'method', 'vlan']) assert.ok(c.guessed.includes(k), k);
+});
+t('import prefill: public IP -> internet (guess); L4 -> IT', () => {
+  assert.strictEqual(Cn.fromImport({ ip: '8.8.4.4' }).type, 'internet');
+  assert.strictEqual(Cn.fromImport({ ip: '10.10.5.20', purdue: 'L4' }).type, 'it');
+});
+t('import: explicit CSV values are not guesses', () => {
+  const c = Cn.fromImport({ ip: '10.1.1.1', connType: 'Vendor remote (eWON)', protocols: ['enip', 'modbus'], vlan: '110' });
+  assert.strictEqual(c.type, 'vendor'); assert.ok(!c.guessed.includes('type')); assert.deepStrictEqual(c.protocols, ['EtherNet/IP (CIP)', 'Modbus/TCP']);
+});
+t('merge never overwrites what a person entered', () => {
+  const m = Cn.merge({ type: 'cell', protocols: ['PROFINET'], guessed: [] }, Cn.fromImport({ ip: '10.1.1.1', ports: [{ port: 502 }] }));
+  assert.strictEqual(m.type, 'cell'); assert.deepStrictEqual(m.protocols, ['PROFINET']); assert.ok(m.vlan);
+});
+t('topology groups by zone then gateway name', () => {
+  const as = [{ id: 'g', name: 'GW', zone: 'Z' }, { id: 'x', name: 'X', zone: 'Z', conn: { gateway: 'g' } }, { id: 'y', name: 'Y', zone: '' }];
+  const t2 = Cn.topology(as); assert.deepStrictEqual([...t2.get('Z').keys()].sort(), ['(direct / not recorded)', 'GW']); assert.ok(t2.has('(no zone)'));
+});
+t('sample plant scores unchanged with connectivity (v1 57.8, v7 40, v8 override 23.3)', () => {
+  const w = {}; new Function('window', fs.readFileSync(path.join(root, 'js/sample.js'), 'utf8'))(w); const d = w.SAMPLE_DATA();
+  const sc = id => { const v = d.vulns.find(x => x.id === id); return S.score(d.assets.find(a => a.id === v.assetId), v); };
+  assert.strictEqual(sc('v1').score, 57.8); assert.strictEqual(sc('v7').score, 40); assert.strictEqual(sc('v8').reachSrc, 'manual');
+  assert.ok(d.sites.every(s => s.region)); assert.ok(d.assets.filter(a => a.conn).length >= 18);
+});
+
 // ---- real feed smoke test (if data/ exists) ----
 const dataDir = path.join(root, 'data');
 if (fs.existsSync(path.join(dataDir, 'ics.json'))) {

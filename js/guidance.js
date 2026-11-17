@@ -30,7 +30,7 @@
     add('segment', 'Restrict who can reach it (segmentation / ACL)',
       `Allow only named engineering/HMI hosts to talk to ${asset.name || 'this asset'}${asset.ip ? ' (' + asset.ip + ')' : ''} on the ports it needs; block everything else at the cell/zone firewall or switch ACL. Log denies.`,
       'Most ICS exploits need network reach. Cutting reach lowers R (reachability) in the score.');
-    if (+v.reach === 3 || /remote|vpn|internet|cellular|modem|default (admin|password)|credential/i.test(t + ' ' + (asset.notes || '')))
+    if (+v.reach === 3 || /remote|vpn|internet|cellular|modem|default (admin|password)|credential/i.test(t + ' ' + (asset.notes || '') + ' ' + ((asset.conn && asset.conn.remote) || '')))
       add('remote', 'Lock down remote access',
         'Remove direct internet/vendor-modem paths. Route vendor access through the OT DMZ jump host with MFA, named accounts, session recording, and access enabled only for scheduled sessions.',
         'Remote paths are how most opportunistic attacks reach OT.');

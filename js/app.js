@@ -7,7 +7,10 @@
   const today = () => new Date().toISOString().slice(0, 10);
   const money = n => n == null ? '—' : '$' + Math.round(n).toLocaleString();
   const pill = r => `<span class="pill ${r.cls}">${esc(r.level)} ${r.score}</span>`;
-  const H = window.OTHelp, G = window.OTGuide, F = window.OTFeeds, M = window.OTMatch;
+  const H = window.OTHelp, G = window.OTGuide, F = window.OTFeeds, M = window.OTMatch, C = window.OTConn;
+  const siteOf = a => D.sites.find(x => x.id === a.siteId) || {};
+  const guessTag = (a, k) => a.conn && (a.conn.guessed || []).includes(k) ? ' <span class="tag warn">guess</span>' : '';
+  const connChip = a => { const c = a.conn, rr = c && S.connReach(c); if (!rr) return '<span class="tag">not recorded</span>'; const ex = C.exposure(a); return `<span class="cchip r${rr.r}" title="${esc(rr.why)}">${esc(C.typeLabel(c.type))}</span>${ex ? ` <span class="tag kev" title="${esc(ex)}">⚠ exposed</span>` : ''}${(c.guessed || []).includes('type') ? ' <span class="tag warn">guess</span>' : ''}`; };
   const tip = k => { const t = H.TIPS[k] || k; return `<span class="tip" tabindex="0" role="note" aria-label="${esc(t)}" data-tip="${esc(t)}">?</span>`; };
   const disc = (extra = '') => `<div class="disc">${esc(G.DISCLAIMER)}${extra ? ' ' + esc(extra) : ''}</div>`;
 
@@ -18,7 +21,16 @@
   function migrate(d) {
     d.settings = Object.assign({ feedsOnly: true, showLow: false }, d.settings || {});
     d.feed = Object.assign({ known: {}, newKeys: {}, dismissed: {}, confirmed: {}, changes: [], lastFeed: null, lastVisit: null }, d.feed || {});
-    d.ui = Object.assign({ hideChecklist: false, lastBackup: null }, d.ui || {});
+    d.ui = Object.assign({ hideChecklist: false, lastBackup: null, groupBy: 'type', groupScope: 'site', groupSort: 'max', netExposedOnly: false }, d.ui || {});
+    // Upgrade an untouched v0.2 sample plant with the v0.3 sample regions, lines and connectivity.
+    if (/\(fictional\)/.test((d.company || {}).name || '') && (d.assets || []).length && !d.assets.some(a => a.conn) && d.assets.every(a => a.source === 'sample' || a.source === 'feed')) {
+      const sd = SAMPLE_DATA();
+      d.sites.forEach(x => { const t = sd.sites.find(y => y.id === x.id); if (t && x.region == null) x.region = t.region; });
+      d.assets.forEach(a => { const t = sd.assets.find(y => y.id === a.id); if (t) { if (t.conn) a.conn = t.conn; if (a.line == null) a.line = t.line; } });
+      d.vulns.forEach(v => { const t = sd.vulns.find(y => y.id === v.id); if (t && t.reachOverride) v.reachOverride = true; });
+    }
+    (d.sites || []).forEach(x => { if (x.region == null) x.region = ''; });
+    (d.assets || []).forEach(a => { if (a.line == null) a.line = ''; });
     return d;
   }
   function save() { localStorage.setItem(KEY, JSON.stringify(D)); }
@@ -40,7 +52,7 @@
   }
 
   // ---------- router ----------
-  const routes = { '': dashboard, calc, assets, asset: assetDetail, register, import: importView, maturity, company, settings, help, alerts, vuln: vulnDetail };
+  const routes = { '': dashboard, calc, assets, asset: assetDetail, register, import: importView, maturity, company, settings, help, alerts, vuln: vulnDetail, network };
   function route() {
     if (/^#help-/.test(location.hash)) { const el = document.getElementById(location.hash.slice(1)); if (el) { el.scrollIntoView(); return; } location.hash = '#/help'; return; }
     const h = location.hash.replace(/^#\/?/, ''); const [name, ...rest] = h.split('/');
@@ -185,6 +197,7 @@
       <div class="card kpi"><div class="l">Maturity</div><div class="n" style="font-size:20px">${ml ? esc(ml) + ' Secured' : '<a href="#/maturity">Assess →</a>'}</div><div class="mute small">${mt ? mt + ' / 27' : 'not assessed'}</div></div>
       <div class="card kpi"><div class="l">Est. annual loss (P50, ${aleRows.length} risks)</div><div class="n" style="font-size:22px">${aleRows.length ? money(aleSum) : '—'}</div><div class="mute small">FAIR-style estimate, sum of medians</div></div>
     </div>
+    ${breakdownCard()}
     <div class="grid g2" style="margin-top:14px">
       <div class="card"><h2 style="margin-top:0">Top risks</h2><table><tr><th>Risk</th><th>Asset</th><th>CVE</th><th>Status</th><th>Due</th></tr>
         ${act.slice(0, 8).map(x => `<tr><td>${pill(x.r)}</td><td><a href="#/asset/${esc(x.a.id)}">${esc(x.a.name)}</a><div class="mute small">${esc(x.a.purdue)} · ${esc(x.a.zone)}</div></td><td>${esc(x.v.cve)} ${x.v.kev ? '<span class="tag kev">KEV</span>' : ''}</td><td>${esc(x.v.status)}</td><td>${dueCell(x)}</td></tr>`).join('') || '<tr><td colspan=5 class="mute">No open vulnerabilities.</td></tr>'}
@@ -192,8 +205,9 @@
       <div class="card"><h2 style="margin-top:0">Open risk by Purdue level</h2><table class="heat"><tr><th>Level</th>${bands.map(b => `<th style="text-align:center">${b}</th>`).join('')}</tr>${heat}</table>
       <h2>Assets by zone</h2>${Object.entries(zones).map(([z, n]) => `<div class="row small"><span style="width:110px">${esc(z)}</span><div class="bar" style="flex:1"><span style="width:${n / maxZ * 100}%;background:var(--blue)"></span></div><span style="width:24px;text-align:right">${n}</span></div>`).join('')}
       ${ml ? `<h2>What ${esc(ml)} Secured means here</h2><p class="small">${esc(S.COMP_CONTROLS[ml])}</p>${disc()}` : ''}</div>
-    </div>`);
-    bindDash();
+    </div>
+    <div class="grid g2" style="margin-top:14px">${connTile()}</div>`);
+    bindDash(); bindBreakdown();
   }
   function bindDash() {
     const v = $('#view');
@@ -210,6 +224,7 @@
       ['Name your company and sites', '#/company', D.company.name && D.company.name !== 'My Company'],
       ['Run the 9-question maturity wizard for this site', '#/maturity/0', !!matTotal(s)],
       ['Add or import your equipment (vendor, model, firmware)', '#/assets', sa.length > 0],
+      ['Record how each asset connects to the network', '#/network', sa.length > 0 && sa.every(a => a.conn && a.conn.type)],
       ['Rate each asset\'s criticality and confirm Purdue level', '#/assets', sa.length > 0 && sa.every(a => (a.source === 'sample' || a.source === 'manual' || a.critReviewed) && !a.purdueGuessed)],
       ['Review feed alerts: confirm or dismiss possible matches', '#/alerts', Object.keys(D.feed.confirmed).length + Object.keys(D.feed.dismissed).length > 0],
       ['Open a Fix guide and record compensating controls', '#/register', D.vulns.some(v => ids.has(v.assetId) && v.compensating)],
@@ -249,7 +264,7 @@
   }
   const calcHash = o => '#/calc/(' + Object.keys(CALC_DEF).filter(k => o[k] !== '' && o[k] != null).map(k => k + ':' + encodeURIComponent(o[k])).join('/') + ')';
   function calcFromVuln(a, v) {
-    return calcHash({ OP: a.crit.op, SA: a.crit.sa, RD: a.crit.rd, RG: a.crit.rc, PL: a.purdue, CV: v.cvss, KEV: v.kev ? 1 : 0, EP: v.epss ?? '', PX: v.publicExploit ? 1 : 0, RE: v.reach, RC: v.rcis, MAT: matLevel(site()) || 'Reasonably', LEF: v.fair ? v.fair.lef.join('-') : '', LM: v.fair ? v.fair.lm.join('-') : '' });
+    return calcHash({ OP: a.crit.op, SA: a.crit.sa, RD: a.crit.rd, RG: a.crit.rc, PL: a.purdue, CV: v.cvss, KEV: v.kev ? 1 : 0, EP: v.epss ?? '', PX: v.publicExploit ? 1 : 0, RE: S.effectiveReach(a, v).r, RC: v.rcis, MAT: matLevel(site()) || 'Reasonably', LEF: v.fair ? v.fair.lef.join('-') : '', LM: v.fair ? v.fair.lm.join('-') : '' });
   }
   function calc(arg) {
     const o = parseCalc(arg);
@@ -334,26 +349,46 @@
     const list = siteAssets(), sc = scored();
     const worst = id => sc.filter(x => x.a.id === id && x.v.status !== 'Remediated' && x.v.status !== 'Accepted')[0];
     view(`<div class="row"><h1>OT Asset Inventory</h1>${tip('assets')}<span class="mute">${list.length} assets · ${esc(site().name)}</span>
-      <span class="right"><input id="flt" placeholder="Filter…" style="width:200px"></span><button class="pri" id="addA">+ Add asset</button><a class="btn" href="#/import">Import scan…</a></div>
-    <div class="card" style="margin-top:10px;overflow:auto"><table id="atab"><tr><th>Name</th><th>Type</th><th>Vendor / model</th><th>Firmware</th><th>IP</th><th>Purdue</th><th>Zone</th><th>AIS</th><th>Worst open risk</th><th>Alerts</th><th>Source</th></tr>
-    ${list.map(a => { const ai = S.ais(a.crit, a.purdue), w = worst(a.id); return `<tr data-f="${esc((a.name + a.type + a.vendor + a.model + a.ip + a.zone).toLowerCase())}"><td><a href="#/asset/${esc(a.id)}">${esc(a.name)}</a></td><td>${esc(a.type)}</td><td>${esc(a.vendor)}<div class="mute small">${esc(a.model)}</div></td><td>${esc(a.firmware)}</td><td>${esc(a.ip)}</td><td>${esc(a.purdue)}${a.purdueGuessed ? ' <span class="tag warn">guess</span>' : ''}</td><td>${esc(a.zone)}</td><td>${ai.score} <span class="mute small">${ai.level}</span></td><td>${w ? pill(w.r) : '<span class="mute">—</span>'}</td><td>${(n => n ? `<a href="#/asset/${esc(a.id)}"><span class="conf Medium">${n} possible</span></a>` : '<span class="mute">—</span>')(openMatches().filter(m => m.assetId === a.id).length)}</td><td><span class="tag">${esc(a.source)}</span></td></tr>`; }).join('')}</table></div>`);
+      <span class="right"><input id="flt" placeholder="Filter…" style="width:200px"></span><button class="pri" id="addA">+ Add asset</button><a class="btn" href="#/import">Import scan…</a><a class="btn" href="#/network">Network view</a></div>
+    <div class="card" style="margin-top:10px;overflow:auto"><table id="atab"><tr><th>Name</th><th>Type</th><th>Vendor / model</th><th>Firmware</th><th>IP</th><th>Purdue</th><th>Zone</th><th>AIS</th><th>Connectivity ${tip('connectivity')}</th><th>Worst open risk</th><th>Alerts</th><th>Source</th></tr>
+    ${list.map(a => { const ai = S.ais(a.crit, a.purdue), w = worst(a.id); return `<tr data-f="${esc((a.name + a.type + a.vendor + a.model + a.ip + a.zone).toLowerCase())}"><td><a href="#/asset/${esc(a.id)}">${esc(a.name)}</a></td><td>${esc(a.type)}</td><td>${esc(a.vendor)}<div class="mute small">${esc(a.model)}</div></td><td>${esc(a.firmware)}</td><td>${esc(a.ip)}</td><td>${esc(a.purdue)}${a.purdueGuessed ? ' <span class="tag warn">guess</span>' : ''}</td><td>${esc(a.zone)}${a.line ? `<div class="small mute">${esc(a.line)}</div>` : ''}</td><td>${ai.score} <span class="mute small">${ai.level}</span></td><td>${connChip(a)}</td><td>${w ? pill(w.r) : '<span class="mute">—</span>'}</td><td>${(n => n ? `<a href="#/asset/${esc(a.id)}"><span class="conf Medium">${n} possible</span></a>` : '<span class="mute">—</span>')(openMatches().filter(m => m.assetId === a.id).length)}</td><td><span class="tag">${esc(a.source)}</span></td></tr>`; }).join('')}</table></div>`);
     $('#flt').oninput = e => { const q = e.target.value.toLowerCase(); document.querySelectorAll('#atab tr[data-f]').forEach(tr => tr.style.display = tr.dataset.f.includes(q) ? '' : 'none'); };
     $('#addA').onclick = () => editAsset(null);
   }
   function editAsset(a) {
-    const isNew = !a; a = a || { id: uid('a'), siteId: site().id, name: '', type: '', vendor: '', model: '', firmware: '', ip: '', mac: '', purdue: 'L1', zone: '', crit: { op: 2, sa: 1, rd: 2, rc: 1 }, owner: '', notes: '', source: 'manual', lastSeen: today() };
+    const isNew = !a; a = a || { id: uid('a'), siteId: site().id, name: '', type: '', vendor: '', model: '', firmware: '', ip: '', mac: '', purdue: 'L1', zone: '', line: '', crit: { op: 2, sa: 1, rd: 2, rc: 1 }, owner: '', notes: '', source: 'manual', lastSeen: today() };
+    const cn = Object.assign({ type: '', method: '', switchPort: '', vlan: '', gateway: '', remote: '', firewall: 'unknown', fwNote: '', protocols: [], verified: '', guessed: [] }, a.conn || {});
+    const others = D.assets.filter(x => x.siteId === a.siteId && x.id !== a.id);
+    const gwIsAsset = others.some(x => x.id === cn.gateway);
     const f = (k, l, t = 'text') => `<div><label>${l}</label><input name="${k}" type="${t}" value="${esc(a[k])}"></div>`;
     const c = S.AIS_CRITERIA.map(cr => `<div><label>${cr.name}</label><select name="crit.${cr.key}">${cr.opts.map((t, j) => `<option value="${j + 1}" ${a.crit[cr.key] == j + 1 ? 'selected' : ''}>${j + 1} – ${esc(t)}</option>`).join('')}</select></div>`).join('');
     modal(`<h2 style="margin-top:0">${isNew ? 'Add' : 'Edit'} asset</h2><form id="af"><div class="form">${f('name', 'Name / tag')}${f('type', 'Type (PLC, HMI, EWS…)')}${f('vendor', 'Vendor')}${f('model', 'Model')}${f('firmware', 'Firmware / OS version ' + tip('firmware'))}${f('ip', 'IP address')}${f('mac', 'MAC')}
       <div><label>Purdue level</label><select name="purdue">${Object.entries(S.PURDUE).map(([k, p]) => `<option value="${k}" ${a.purdue === k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
-      ${f('zone', 'Zone / cell')}${f('owner', 'Owner')}</div><p class="small mute">Vendor, model (catalog number if you have it) and firmware let the nightly feeds find advisories for this asset.</p><h3>Criticality criteria (AIS) ${tip('criticality')}</h3><div class="form">${c}</div>
+      ${f('zone', 'Zone / cell')}${f('line', 'Production line')}${f('owner', 'Owner')}</div><p class="small mute">Vendor, model (catalog number if you have it) and firmware let the nightly feeds find advisories for this asset.</p><h3>Criticality criteria (AIS) ${tip('criticality')}</h3><div class="form">${c}</div>
+      <h3>Network connectivity ${tip('connectivity')}</h3><p class="small mute">How is it hooked into the network, if at all? This sets reachability (R) for every vulnerability on this asset.${cn.guessed.length ? ' Fields marked <span class="tag warn">guess</span> were prefilled from an import; saving this form confirms them.' : ''}</p>
+      <div class="form">
+        <div><label>Connection type${guessTag(a, 'type')}</label><select name="conn.type"><option value="">Not recorded</option>${Object.entries(S.CONN_TYPES).map(([k, t]) => `<option value="${k}" ${cn.type === k ? 'selected' : ''}>${esc(t.label)} (R ${t.r})</option>`).join('')}</select></div>
+        <div><label>Method${guessTag(a, 'method')}</label><select name="conn.method"><option value="">—</option>${Object.entries(C.METHODS).map(([k, t]) => `<option value="${k}" ${cn.method === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+        <div><label>Switch / port</label><input name="conn.switchPort" value="${esc(cn.switchPort)}" placeholder="SW-PAINT-01 Gi1/0/3"></div>
+        <div><label>VLAN / subnet${guessTag(a, 'vlan')}</label><input name="conn.vlan" value="${esc(cn.vlan)}" placeholder="VLAN 110 or 10.20.10.0/24"></div>
+        <div><label>Gateway / parent device ${tip('gateway')}</label><select name="conn.gwSel"><option value="">— none / type below —</option>${others.map(x => `<option value="${esc(x.id)}" ${cn.gateway === x.id ? 'selected' : ''}>${esc(x.name)} (${esc(x.type)})</option>`).join('')}</select><input name="conn.gwText" value="${gwIsAsset ? '' : esc(cn.gateway)}" placeholder="or type: SW-PAINT-01, eWON, serial gateway…" style="margin-top:4px"></div>
+        <div><label>Remote access path${guessTag(a, 'remote')} ${tip('remote')}</label><input name="conn.remote" list="remoteList" value="${esc(cn.remote)}" placeholder="none, jump host, VPN, TeamViewer, eWON…"><datalist id="remoteList">${['none', 'DMZ jump host + MFA', 'Corporate VPN', 'Vendor VPN', 'TeamViewer', 'eWON / Talk2M', 'Secomea', 'Cellular modem', 'Vendor cloud portal'].map(x => `<option value="${x}">`).join('')}</datalist></div>
+        <div><label>Firewall / ACL in front?</label><select name="conn.firewall">${Object.entries(C.FIREWALL).map(([k, t]) => `<option value="${k}" ${cn.firewall === k ? 'selected' : ''}>${t}</option>`).join('')}</select><input name="conn.fwNote" value="${esc(cn.fwNote)}" placeholder="note: which rule / what it allows" style="margin-top:4px"></div>
+        <div><label>Last verified</label><input name="conn.verified" type="date" value="${esc(cn.verified)}"></div>
+      </div>
+      <label>Protocols in use${guessTag(a, 'protocols')} ${tip('protocols')}</label><div class="protos">${[...new Set(C.PROTOCOLS.concat(cn.protocols))].map(pr => `<label class="inl small"><input type="checkbox" name="conn.proto" value="${esc(pr)}" ${cn.protocols.includes(pr) ? 'checked' : ''}>${esc(pr)}</label>`).join('')}</div>
+      <input name="conn.protoOther" placeholder="Other protocols, comma-separated" style="margin-top:4px">
       <label>Notes</label><textarea name="notes" rows="2">${esc(a.notes)}</textarea>
       <div class="row" style="margin-top:12px"><button class="pri" type="submit">Save</button><button type="button" id="cx">Cancel</button>${isNew ? '' : '<button type="button" class="danger right" id="del">Delete asset</button>'}</div></form>`, el => {
       $('#cx', el).onclick = closeModal;
       if (!isNew) $('#del', el).onclick = () => { if (confirm('Delete asset and its vulnerabilities?')) { D.assets = D.assets.filter(x => x.id !== a.id); D.vulns = D.vulns.filter(v => v.assetId !== a.id); save(); closeModal(); location.hash = '#/assets'; } };
       $('#af', el).onsubmit = e => {
         e.preventDefault(); const fd = new FormData(e.target);
-        for (const [k, v] of fd) { if (k.startsWith('crit.')) a.crit[k.slice(5)] = +v; else a[k] = v; }
+        const nc = { protocols: [] };
+        for (const [k, v] of fd) { if (k.startsWith('crit.')) a.crit[k.slice(5)] = +v; else if (k === 'conn.proto') nc.protocols.push(v); else if (k.startsWith('conn.')) nc[k.slice(5)] = v; else a[k] = v; }
+        String(nc.protoOther || '').split(',').map(x => x.trim()).filter(Boolean).forEach(x => nc.protocols.includes(x) || nc.protocols.push(x));
+        const conn = { type: nc.type, method: nc.method, switchPort: nc.switchPort.trim(), vlan: nc.vlan.trim(), gateway: nc.gwSel || nc.gwText.trim(), remote: nc.remote.trim(), firewall: nc.firewall, fwNote: nc.fwNote.trim(), protocols: nc.protocols, verified: nc.verified, guessed: [] };
+        if (conn.type || conn.method || conn.gateway || conn.protocols.length || conn.remote) a.conn = conn; else delete a.conn;
         a.purdueGuessed = false; a.critReviewed = true; if (isNew) D.assets.push(a); save(); closeModal(); processFeeds(); route();
       };
     });
@@ -363,8 +398,9 @@
     const ai = S.ais(a.crit, a.purdue), rows = scored(false).filter(x => x.a.id === a.id);
     view(`<p><a href="#/assets">← Assets</a></p><div class="row"><h1>${esc(a.name)}</h1><span class="tag">${esc(a.purdue)}</span><span class="tag">${esc(a.zone)}</span><button class="right" id="ea">Edit asset</button></div>
     <div class="grid g2"><div class="card"><table>
-      <tr><td class="mute">Type</td><td>${esc(a.type)}</td></tr><tr><td class="mute">Vendor / model</td><td>${esc(a.vendor)} ${esc(a.model)}</td></tr><tr><td class="mute">Firmware</td><td>${esc(a.firmware)}</td></tr>
+      <tr><td class="mute">Type</td><td>${esc(a.type)}</td></tr><tr><td class="mute">Site / line</td><td>${esc(siteOf(a).name)}${siteOf(a).region ? ' · ' + esc(siteOf(a).region) : ''}${a.line ? ' · ' + esc(a.line) : ''}</td></tr><tr><td class="mute">Vendor / model</td><td>${esc(a.vendor)} ${esc(a.model)}</td></tr><tr><td class="mute">Firmware</td><td>${esc(a.firmware)}</td></tr>
       <tr><td class="mute">IP / MAC</td><td>${esc(a.ip)} ${esc(a.mac)}</td></tr><tr><td class="mute">Owner</td><td>${esc(a.owner)}</td></tr><tr><td class="mute">Source / last seen</td><td>${esc(a.source)} · ${esc(a.lastSeen)}</td></tr><tr><td class="mute">Notes</td><td>${esc(a.notes)}</td></tr></table></div>
+      ${connCard(a)}
       <div class="card"><h3 style="margin-top:0">Asset Importance Score: ${ai.score} (${ai.level})</h3><table>${S.AIS_CRITERIA.map(c => `<tr><td>${c.name}</td><td>${a.crit[c.key]} – ${esc(c.opts[a.crit[c.key] - 1])}</td></tr>`).join('')}<tr><td>Purdue modifier</td><td>+${ai.purdueMod}</td></tr></table></div></div>
     <div class="row" style="margin-top:14px"><h2>Vulnerabilities</h2><button class="pri right" id="av">+ Add vulnerability</button></div>
     <div class="card" style="overflow:auto"><table><tr><th>Risk</th><th>CVE</th><th>CVSS</th><th>KEV ${tip('kev')}</th><th>EPSS ${tip('epss')}</th><th>R ${tip('reach')}</th><th>RCIS</th><th>Status ${tip('status')}</th><th>Due</th><th></th></tr>
@@ -373,6 +409,8 @@
     ${(ms => ms.length ? `<div class="row" style="margin-top:14px"><h2>Possible matches from CISA feeds (${ms.length})</h2>${tip('confidence')}<a class="right" href="#/alerts">All alerts →</a></div><div class="card" style="overflow:auto"><table><tr><th>Asset</th><th>Advisory &amp; reason</th><th>Confidence</th><th></th></tr>${ms.map(m => matchRow(m, false)).join('')}</table></div>` : '')(openMatches().filter(m => m.assetId === a.id).slice(0, 40))}`);
     bindMatchButtons($('#view'), route);
     $('#ea').onclick = () => editAsset(a); $('#av').onclick = () => editVuln(null, a);
+    if ($('#ec')) $('#ec').onclick = () => editAsset(a);
+    if ($('#vt')) $('#vt').onclick = () => { a.conn.verified = today(); a.conn.guessed = []; save(); route(); };
     document.querySelectorAll('[data-ev]').forEach(b => b.onclick = () => editVuln(D.vulns.find(v => v.id === b.dataset.ev), a));
   }
   function editVuln(v, a) {
@@ -385,7 +423,7 @@
       <div><label>KEV listed</label><select name="kev"><option value="0">No</option><option value="1" ${v.kev ? 'selected' : ''}>Yes</option></select></div>
       <div><label>EPSS (0–1)</label><input name="epss" type="number" step="0.0001" value="${esc(v.epss)}"></div>
       <div><label>Public exploit</label><select name="publicExploit"><option value="0">No/unknown</option><option value="1" ${v.publicExploit ? 'selected' : ''}>Yes</option></select></div>
-      <div><label>Reachability (R) ${tip('reach')}</label><select name="reach">${[[3, '3 – Internet/IT/remote path'], [2, '2 – OT only'], [1, '1 – Local/isolated']].map(([k, t]) => `<option value="${k}" ${v.reach == k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div><label>Reachability (R) ${tip('reach')}</label><select name="reach">${(cr => cr ? `<option value="auto" ${!v.reachOverride ? 'selected' : ''}>Auto from connectivity: ${cr.r} (${esc(C.typeLabel(a.conn.type))})</option>` : '')(S.connReach(a.conn))}${[[3, '3 – Internet/IT/remote path'], [2, '2 – OT only'], [1, '1 – Local/isolated']].map(([k, t]) => `<option value="${k}" ${(v.reachOverride || !S.connReach(a.conn)) && v.reach == k ? 'selected' : ''}>${t}${S.connReach(a.conn) ? ' (manual override)' : ''}</option>`).join('')}</select></div>
       <div><label>RCIS</label><select name="rcis">${['1.0', '1.2', '1.5'].map(k => `<option ${(+v.rcis).toFixed(1) === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
       <div><label>Status ${tip('status')}</label><select name="status">${['Open', 'Contained', 'Remediated', 'Accepted'].map(k => `<option ${v.status === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>
       <div><label>Date found</label><input name="found" type="date" value="${esc(v.found)}"></div><div><label>Owner</label><input name="owner" value="${esc(v.owner)}"></div></div>
@@ -402,7 +440,7 @@
       };
       $('#vf', el).onsubmit = e => {
         e.preventDefault(); const f = e.target;
-        Object.assign(v, { cve: f.cve.value.trim().toUpperCase(), title: f.title.value, cvss: f.cvss.value === '' ? '' : +f.cvss.value, kev: f.kev.value === '1', epss: f.epss.value === '' ? '' : +f.epss.value, publicExploit: f.publicExploit.value === '1', reach: +f.reach.value, rcis: +f.rcis.value, status: f.status.value, found: f.found.value, owner: f.owner.value, compensating: f.compensating.value, decision: f.decision.value });
+        Object.assign(v, { cve: f.cve.value.trim().toUpperCase(), title: f.title.value, cvss: f.cvss.value === '' ? '' : +f.cvss.value, kev: f.kev.value === '1', epss: f.epss.value === '' ? '' : +f.epss.value, publicExploit: f.publicExploit.value === '1', reach: f.reach.value === 'auto' ? (S.connReach(a.conn) || { r: 2 }).r : +f.reach.value, reachOverride: f.reach.value !== 'auto' && !!S.connReach(a.conn), rcis: +f.rcis.value, status: f.status.value, found: f.found.value, owner: f.owner.value, compensating: f.compensating.value, decision: f.decision.value });
         const lef = [0, 1, 2].map(i => f['lef' + i].value), lm = [0, 1, 2].map(i => f['lm' + i].value);
         v.fair = lef.every(x => x !== '') && lm.every(x => x !== '') ? { lef: lef.map(Number), lm: lm.map(Number) } : null;
         if (isNew) D.vulns.push(v); save(); closeModal(); processFeeds(); route();
@@ -411,27 +449,32 @@
   }
 
   // ---------- risk register ----------
-  function register() {
-    const all = scored();
-    view(`<div class="row"><h1>Risk Register</h1>${tip('register')}<span class="mute">${esc(site().name)} · maturity: ${esc(matLevel(site()) || 'not assessed (Reasonably assumed)')}</span>
+  function register(arg) {
+    const q = Object.fromEntries(String(arg || '').split('&').filter(Boolean).map(kv => { const i = kv.indexOf('='); return [kv.slice(0, i), decodeURIComponent(kv.slice(i + 1))]; }));
+    const allSites = q.scope === 'all', g = GROUPS[q.by];
+    let all = scored(!allSites);
+    if (g && q.val != null) all = all.filter(x => g[1](x) === q.val);
+    const chip = g && q.val != null ? `<div class="note" style="margin:8px 0">Filtered: <b>${esc(g[0])} = ${esc(q.val)}</b>${allSites ? ' · all sites' : ' · ' + esc(site().name)}${q.level ? ' · ' + esc(q.level) : ''} <a href="#/register" style="margin-left:8px">✕ clear filter</a> · <a href="#/">back to dashboard</a></div>` : '';
+    view(`<div class="row"><h1>Risk Register</h1>${tip('register')}<span class="mute">${allSites ? 'All sites' : esc(site().name) + ' · maturity: ' + esc(matLevel(site()) || 'not assessed (Reasonably assumed)')}</span>
       <span class="right row"><select id="fs" style="width:auto"><option value="">All statuses</option><option selected value="active">Open + Contained</option><option>Open</option><option>Contained</option><option>Remediated</option><option>Accepted</option></select>
-      <select id="fb" style="width:auto"><option value="">All levels</option><option>Critical</option><option>High</option><option>Moderate</option><option>Low</option></select><button id="csv">Export CSV</button></span></div>
+      <select id="fb" style="width:auto"><option value="">All levels</option><option>Critical</option><option>High</option><option>Moderate</option><option>Low</option></select><button id="csv">Export CSV</button></span></div>${chip}
       <div class="card" style="overflow:auto;margin-top:10px"><table id="rt"></table></div>
       <p class="small mute">Sorted by v2 risk score. Due dates come from Table 3: containment by risk level, remediation window by site maturity. Overdue items need a documented exception.</p>${disc()}`);
     const draw = () => {
       const fs = $('#fs').value, fb = $('#fb').value;
       const rows = all.filter(x => (!fs || (fs === 'active' ? ['Open', 'Contained'].includes(x.v.status) : x.v.status === fs)) && (!fb || x.r.level === fb));
       $('#rt').innerHTML = `<tr><th>#</th><th>Risk</th><th>Asset</th><th>Vulnerability</th><th>AIS·VSS·LF·RCIS</th><th>Status</th><th>Due</th><th>Owner</th><th>Compensating control / decision</th></tr>` +
-        rows.map((x, i) => `<tr><td>${i + 1}</td><td>${pill(x.r)}${x.r.floored ? '<div class="small mute">KEV floor</div>' : ''}</td><td><a href="#/asset/${esc(x.a.id)}">${esc(x.a.name)}</a><div class="small mute">${esc(x.a.purdue)} · ${esc(x.a.zone)}</div></td>
+        rows.map((x, i) => `<tr><td>${i + 1}</td><td>${pill(x.r)}${x.r.floored ? '<div class="small mute">KEV floor</div>' : ''}</td><td><a href="#/asset/${esc(x.a.id)}">${esc(x.a.name)}</a><div class="small mute">${allSites ? esc(siteOf(x.a).name) + ' · ' : ''}${esc(x.a.purdue)} · ${esc(x.a.zone)}</div><div class="small">${connChip(x.a)}</div></td>
         <td><a href="#/vuln/${esc(x.v.id)}">${esc(x.v.cve)}</a> ${x.v.kev ? '<span class="tag kev">KEV</span>' : ''}${x.v.rescored ? ` <span class="tag chg" title="${esc(x.v.rescored.why)}">re-scored</span>` : ''}<div class="small mute">${esc(x.v.title)}</div><a class="small" href="#/vuln/${esc(x.v.id)}">Fix guide →</a></td><td class="small">${x.r.ais.score} · ${x.r.vss.score} · ${x.r.lf} · ${x.r.rcis}<div><a href="${calcFromVuln(x.a, x.v)}">open in calculator</a></div></td>
         <td>${esc(x.v.status)}</td><td>${dueCell(x)}</td><td>${esc(x.v.owner)}</td><td class="small">${esc(x.v.compensating)}${x.v.compensating && x.v.decision ? '<br>' : ''}<i>${esc(x.v.decision)}</i></td></tr>`).join('');
       $('#csv').onclick = () => {
-        const h = ['rank', 'risk_score', 'risk_level', 'asset', 'ip', 'purdue', 'zone', 'cve', 'cvss', 'kev', 'epss', 'ais', 'vss', 'lf', 'rcis', 'status', 'contain_by', 'remediate_by', 'overdue', 'owner', 'compensating', 'decision'];
+        const h = ['rank', 'risk_score', 'risk_level', 'asset', 'site', 'region', 'line', 'connectivity', 'reach', 'reach_reason', 'ip', 'purdue', 'zone', 'cve', 'cvss', 'kev', 'epss', 'ais', 'vss', 'lf', 'rcis', 'status', 'contain_by', 'remediate_by', 'overdue', 'owner', 'compensating', 'decision'];
         const q = s => '"' + String(s ?? '').replace(/"/g, '""') + '"';
-        const lines = [h.join(',')].concat(rows.map((x, i) => [i + 1, x.r.score, x.r.level, x.a.name, x.a.ip, x.a.purdue, x.a.zone, x.v.cve, x.v.cvss, x.v.kev, x.v.epss, x.r.ais.score, x.r.vss.score, x.r.lf, x.r.rcis, x.v.status, x.sla.containBy, x.sla.remediateBy, x.overdue, x.v.owner, x.v.compensating, x.v.decision].map(q).join(',')));
+        const lines = [h.join(',')].concat(rows.map((x, i) => [i + 1, x.r.score, x.r.level, x.a.name, siteOf(x.a).name, siteOf(x.a).region, x.a.line, C.typeLabel(x.a.conn && x.a.conn.type), x.r.reach, x.r.reachWhy, x.a.ip, x.a.purdue, x.a.zone, x.v.cve, x.v.cvss, x.v.kev, x.v.epss, x.r.ais.score, x.r.vss.score, x.r.lf, x.r.rcis, x.v.status, x.sla.containBy, x.sla.remediateBy, x.overdue, x.v.owner, x.v.compensating, x.v.decision].map(q).join(',')));
         download('risk-register-' + today() + '.csv', lines.join('\n'), 'text/csv');
       };
     };
+    if (q.level) $('#fb').value = q.level;
     $('#fs').onchange = draw; $('#fb').onchange = draw; draw();
   }
   function download(name, text, type) { const b = new Blob([text], { type }); const u = URL.createObjectURL(b); const l = document.createElement('a'); l.href = u; l.download = name; l.click(); setTimeout(() => URL.revokeObjectURL(u), 1000); }
@@ -470,11 +513,12 @@
       let added = 0, updated = 0, vulns = 0; const dz = $('#dz').value.trim(); const src = pending.kind === 'Nmap XML' ? 'nmap' : pending.kind === 'CSV' ? 'csv' : 'collector';
       document.querySelectorAll('.ck').forEach(c => {
         if (!c.checked) return; const { n, m } = pending.items[+c.dataset.i]; let a = m;
-        if (m) { ['vendor', 'model', 'firmware', 'mac'].forEach(k => { if (n[k]) m[k] = n[k]; }); m.lastSeen = today(); if (n.notes) m.notes = (m.notes ? m.notes + ' | ' : '') + n.notes; updated++; }
-        else { a = { id: uid('a'), siteId: site().id, name: n.name, type: n.type, vendor: n.vendor, model: n.model, firmware: n.firmware, ip: n.ip, mac: n.mac, purdue: n.purdue || 'L3', purdueGuessed: !!n.purdueGuessed, zone: n.zone || dz, crit: { op: 2, sa: 1, rd: 2, rc: 1 }, owner: n.owner || '', notes: n.notes || '', source: src, lastSeen: today() }; D.assets.push(a); added++; }
+        const ic = C.fromImport(n);
+        if (m) { ['vendor', 'model', 'firmware', 'mac'].forEach(k => { if (n[k]) m[k] = n[k]; }); if (!m.line && n.line) m.line = n.line; if (ic.type || ic.protocols.length) m.conn = C.merge(m.conn, ic); m.lastSeen = today(); if (n.notes) m.notes = (m.notes ? m.notes + ' | ' : '') + n.notes; updated++; }
+        else { a = { id: uid('a'), siteId: site().id, name: n.name, type: n.type, vendor: n.vendor, model: n.model, firmware: n.firmware, ip: n.ip, mac: n.mac, purdue: n.purdue || 'L3', purdueGuessed: !!n.purdueGuessed, zone: n.zone || dz, line: n.line || '', crit: { op: 2, sa: 1, rd: 2, rc: 1 }, owner: n.owner || '', notes: n.notes || '', source: src, lastSeen: today() }; if (ic.type || ic.protocols.length) a.conn = ic; D.assets.push(a); added++; }
         (n.cves || []).forEach(cve => { if (D.vulns.some(v => v.assetId === a.id && v.cve === cve)) return; D.vulns.push({ id: uid('v'), assetId: a.id, cve, title: 'Imported – look up CVSS/EPSS', cvss: '', kev: !!KEV[cve], epss: '', publicExploit: false, reach: 2, rcis: 1.0, status: 'Open', found: today(), owner: '', decision: '', compensating: '', fair: null }); vulns++; });
       });
-      save(); processFeeds(); $('#prev').innerHTML = `<div class="card" style="margin-top:14px">Imported: <b>${added}</b> new assets, <b>${updated}</b> updated, <b>${vulns}</b> vulnerabilities. New assets get default criticality (2/1/2/1). <a href="#/assets">Review them in the inventory →</a> and confirm Purdue levels marked <span class="tag warn">guess</span>. New feed matches: <a href="#/alerts">${newMatches().length} on the Alerts screen →</a></div>`;
+      save(); processFeeds(); $('#prev').innerHTML = `<div class="card" style="margin-top:14px">Imported: <b>${added}</b> new assets, <b>${updated}</b> updated, <b>${vulns}</b> vulnerabilities. New assets get default criticality (2/1/2/1). <a href="#/assets">Review them in the inventory →</a> and confirm Purdue levels and connectivity marked <span class="tag warn">guess</span>. New feed matches: <a href="#/alerts">${newMatches().length} on the Alerts screen →</a></div>`;
     };
   }
 
@@ -508,14 +552,14 @@
       <label>Company name</label><input name="name" value="${esc(c.name)}"><label>Industry / products</label><input name="industry" value="${esc(c.industry)}">
       <label>Headquarters</label><input name="hq" value="${esc(c.hq)}"><label>Security contact</label><input name="contact" value="${esc(c.contact)}">
       <div style="margin-top:10px"><button class="pri">Save</button> <span id="cs" class="mute small"></span></div></form></div>
-      <div class="card"><div class="row"><h2 style="margin:0">Sites</h2><button class="right" id="ns">+ Add site</button></div><table style="margin-top:8px"><tr><th>Site</th><th>Location</th><th>Assets</th><th>Maturity</th><th></th></tr>
-      ${D.sites.map(s => `<tr><td>${esc(s.name)}<div class="small mute">${esc(s.notes)}</div></td><td>${esc(s.location)}</td><td>${D.assets.filter(a => a.siteId === s.id).length}</td><td>${matLevel(s) ? esc(matLevel(s)) + ' (' + matTotal(s) + ')' : '<span class="mute">—</span>'}</td>
+      <div class="card"><div class="row"><h2 style="margin:0">Sites</h2><button class="right" id="ns">+ Add site</button></div><table style="margin-top:8px"><tr><th>Site</th><th>Region</th><th>Location</th><th>Assets</th><th>Maturity</th><th></th></tr>
+      ${D.sites.map(s => `<tr><td>${esc(s.name)}<div class="small mute">${esc(s.notes)}</div></td><td>${esc(s.region || '—')}</td><td>${esc(s.location)}</td><td>${D.assets.filter(a => a.siteId === s.id).length}</td><td>${matLevel(s) ? esc(matLevel(s)) + ' (' + matTotal(s) + ')' : '<span class="mute">—</span>'}</td>
         <td class="row"><button data-use="${esc(s.id)}">${s.id === D.activeSiteId ? 'Active ✓' : 'Use'}</button><button data-es="${esc(s.id)}">Edit</button></td></tr>`).join('')}</table></div></div>`);
     $('#cf').onsubmit = e => { e.preventDefault(); const fd = new FormData(e.target); for (const [k, v] of fd) c[k] = v; save(); $('#cs').textContent = 'Saved'; };
     document.querySelectorAll('[data-use]').forEach(b => b.onclick = () => { D.activeSiteId = b.dataset.use; save(); route(); });
     const editSite = s => {
-      const isNew = !s; s = s || { id: uid('s'), name: '', location: '', headcount: '', notes: '', maturity: Array(9).fill(0) };
-      modal(`<h2 style="margin-top:0">${isNew ? 'Add' : 'Edit'} site</h2><form id="sf"><label>Name</label><input name="name" value="${esc(s.name)}" required><label>Location</label><input name="location" value="${esc(s.location)}"><label>Headcount</label><input name="headcount" value="${esc(s.headcount)}"><label>Notes</label><textarea name="notes">${esc(s.notes)}</textarea>
+      const isNew = !s; s = s || { id: uid('s'), name: '', location: '', region: '', headcount: '', notes: '', maturity: Array(9).fill(0) };
+      modal(`<h2 style="margin-top:0">${isNew ? 'Add' : 'Edit'} site</h2><form id="sf"><label>Name</label><input name="name" value="${esc(s.name)}" required><label>Location</label><input name="location" value="${esc(s.location)}"><label>Region ${tip('region')}</label><input name="region" list="regionList" value="${esc(s.region || '')}" placeholder="e.g. Central Region"><datalist id="regionList">${[...new Set(D.sites.map(x => x.region).filter(Boolean))].map(r => `<option value="${esc(r)}">`).join('')}</datalist><label>Headcount</label><input name="headcount" value="${esc(s.headcount)}"><label>Notes</label><textarea name="notes">${esc(s.notes)}</textarea>
         <div class="row" style="margin-top:10px"><button class="pri">Save</button><button type="button" id="cx">Cancel</button>${isNew || D.sites.length < 2 ? '' : '<button type="button" class="danger right" id="del">Delete site</button>'}</div></form>`, el => {
         $('#cx', el).onclick = closeModal;
         if ($('#del', el)) $('#del', el).onclick = () => { if (!confirm('Delete site, its assets and vulnerabilities?')) return; const ids = new Set(D.assets.filter(a => a.siteId === s.id).map(a => a.id)); D.vulns = D.vulns.filter(v => !ids.has(v.assetId)); D.assets = D.assets.filter(a => a.siteId !== s.id); D.sites = D.sites.filter(x => x.id !== s.id); D.activeSiteId = D.sites[0].id; save(); closeModal(); route(); };
@@ -524,6 +568,112 @@
     };
     $('#ns').onclick = () => editSite(null);
     document.querySelectorAll('[data-es]').forEach(b => b.onclick = () => editSite(D.sites.find(s => s.id === b.dataset.es)));
+  }
+
+  // ---------- connectivity card (asset page) ----------
+  function connCard(a) {
+    const c = a.conn, rr = c && S.connReach(c);
+    if (!rr) return `<div class="card"><h3 style="margin-top:0">Network connectivity ${tip('connectivity')}</h3><p class="mute">Not recorded yet. Until it is, reachability is set on each vulnerability by hand.</p><button id="ec" class="pri">Record connectivity</button></div>`;
+    const gw = assetById(c.gateway), ex = C.exposure(a);
+    const row = (l, v, k) => `<tr><td class="mute">${l}</td><td>${v || '<span class="mute">—</span>'}${k ? guessTag(a, k) : ''}</td></tr>`;
+    return `<div class="card"><div class="row"><h3 style="margin:0">Network connectivity ${tip('connectivity')}</h3><button id="ec" class="right small">Edit</button></div>
+      ${ex ? `<div class="note warnbox" style="margin:8px 0">⚠ Exposed: ${esc(ex)}. Every vulnerability here scores with reach 3.</div>` : ''}
+      <table class="small">${row('Connection', connChip(a))}${row('Method', esc(C.METHODS[c.method] || ''), 'method')}${row('Switch / port', esc(c.switchPort))}${row('VLAN / subnet', esc(c.vlan), 'vlan')}
+      ${row('Gateway / parent', gw ? `<a href="#/asset/${esc(gw.id)}">${esc(gw.name)}</a>` : esc(c.gateway))}${row('Remote access', esc(c.remote), 'remote')}
+      ${row('Firewall / ACL', esc(C.FIREWALL[c.firewall] || 'Unknown') + (c.fwNote ? ' – ' + esc(c.fwNote) : ''))}${row('Protocols', (c.protocols || []).map(p => `<span class="tag">${esc(p)}</span>`).join(' '), 'protocols')}
+      ${row('Last verified', c.verified ? esc(c.verified) : '<span style="color:#f5d48a">never</span>')}
+      <tr><td class="mute">Reachability</td><td><b>R ${rr.r}</b> – ${esc(rr.why)}</td></tr></table>
+      <div class="row" style="margin-top:6px"><button id="vt" class="small">Mark verified today${(c.guessed || []).length ? ' (confirms guesses)' : ''}</button></div></div>`;
+  }
+
+  // ---------- dashboard: top risks grouped by a factor ----------
+  const exploitStatus = v => v.kev ? 'Exploited in the wild (KEV)' : v.publicExploit ? 'Public exploit available' : (+v.epss >= 0.1) ? 'Likely exploit (EPSS ≥ 0.10)' : 'No known exploit';
+  const GROUPS = {
+    type: ['Asset type', x => x.a.type || '(blank)'],
+    vendormodel: ['Vendor / model', x => (x.a.vendor || '?') + ' · ' + (x.a.model || '?')],
+    vendor: ['Vendor', x => x.a.vendor || '(blank)'],
+    site: ['Plant / site', x => siteOf(x.a).name || '(none)', true],
+    region: ['Region', x => siteOf(x.a).region || '(no region)', true],
+    purdue: ['Purdue level', x => x.a.purdue || '(blank)'],
+    zone: ['Zone / cell', x => x.a.zone || '(no zone)'],
+    line: ['Production line', x => x.a.line || '(no line)'],
+    owner: ['Owner', x => x.v.owner || x.a.owner || '(unassigned)'],
+    kev: ['KEV vs not', x => x.v.kev ? 'KEV-listed' : 'Not in KEV'],
+    exploit: ['Exploit status', x => exploitStatus(x.v)],
+    conn: ['Connectivity', x => C.typeLabel(x.a.conn && x.a.conn.type)],
+  };
+  const isActive = x => x.v.status === 'Open' || x.v.status === 'Contained';
+  function groupRows(by, scope) {
+    const g = GROUPS[by] || GROUPS.type, rows = scored(scope !== 'all').filter(isActive), map = new Map();
+    for (const x of rows) {
+      const k = g[1](x); if (!map.has(k)) map.set(k, { key: k, Critical: 0, High: 0, Moderate: 0, Low: 0, total: 0, max: 0, maxX: null, kev: 0, assets: new Set() });
+      const e = map.get(k); e[x.r.level]++; e.total++; e.assets.add(x.a.id); if (x.v.kev) e.kev++;
+      if (x.r.score > e.max) { e.max = x.r.score; e.maxX = x; }
+    }
+    return [...map.values()];
+  }
+  function breakdownCard() {
+    const by = D.ui.groupBy in GROUPS ? D.ui.groupBy : 'type';
+    const scope = GROUPS[by][2] ? 'all' : D.ui.groupScope;
+    return `<div class="card" style="margin-top:14px"><div class="row"><h2 style="margin:0">Top risks by</h2>
+      <select id="gBy" style="width:auto">${Object.entries(GROUPS).map(([k, g]) => `<option value="${k}" ${k === by ? 'selected' : ''}>${g[0]}</option>`).join('')}</select>
+      <select id="gScope" style="width:auto" ${GROUPS[by][2] ? 'disabled title="Plant and region compare all sites"' : ''}><option value="site" ${scope === 'site' ? 'selected' : ''}>This site</option><option value="all" ${scope === 'all' ? 'selected' : ''}>All sites</option></select>
+      ${tip('breakdown')}<span class="right mute small">Open + Contained · click a row or a count to open the filtered register</span></div>
+      <div style="overflow:auto;margin-top:8px"><table id="gTab" class="gtab"></table></div></div>`;
+  }
+  function drawBreakdown() {
+    const t = $('#gTab'); if (!t) return;
+    const by = D.ui.groupBy in GROUPS ? D.ui.groupBy : 'type', scope = GROUPS[by][2] ? 'all' : D.ui.groupScope, sort = D.ui.groupSort || 'max';
+    const rows = groupRows(by, scope);
+    const key = { name: r => r.key.toLowerCase(), crit: r => -r.Critical, high: r => -r.High, mod: r => -r.Moderate, low: r => -r.Low, total: r => -r.total, max: r => -r.max, assets: r => -r.assets.size, kev: r => -r.kev }[sort] || (r => -r.max);
+    rows.sort((x, y) => { const a = key(x), b = key(y); return a < b ? -1 : a > b ? 1 : (y.max - x.max); });
+    const maxTotal = Math.max(1, ...rows.map(r => r.total));
+    const link = (r, l) => '#/register/' + ['scope=' + scope, 'by=' + by, 'val=' + encodeURIComponent(r.key), l ? 'level=' + l : ''].filter(Boolean).join('&');
+    const th = (k, l, extra = '') => `<th data-s="${k}" class="sortable ${sort === k ? 'on' : ''}" ${extra}>${l}${sort === k ? ' ▾' : ''}</th>`;
+    t.innerHTML = `<tr>${th('name', esc(GROUPS[by][0]))}${th('max', 'Highest')}${th('crit', 'Crit', 'style="text-align:center"')}${th('high', 'High', 'style="text-align:center"')}${th('mod', 'Mod', 'style="text-align:center"')}${th('low', 'Low', 'style="text-align:center"')}${th('total', 'Open')}${th('kev', 'KEV')}${th('assets', 'Assets')}<th style="min-width:180px">Mix by band</th></tr>` +
+      (rows.map(r => `<tr class="clk" data-href="${esc(link(r))}"><td><b>${esc(r.key)}</b>${r.maxX ? `<div class="small mute">worst: ${esc(r.maxX.a.name)} · ${esc(r.maxX.v.cve)}</div>` : ''}</td><td>${r.maxX ? pill(r.maxX.r) : ''}</td>
+        ${['Critical', 'High', 'Moderate', 'Low'].map(l => `<td style="text-align:center">${r[l] ? `<a href="${esc(link(r, l))}" class="cnt ${S.BANDS.find(b => b.level === l).cls}">${r[l]}</a>` : '<span class="mute">·</span>'}</td>`).join('')}
+        <td>${r.total}</td><td>${r.kev || '<span class="mute">0</span>'}</td><td>${r.assets.size}</td>
+        <td><div class="stack" style="width:${Math.max(8, r.total / maxTotal * 100)}%">${['Critical', 'High', 'Moderate', 'Low'].map(l => r[l] ? `<span class="${S.BANDS.find(b => b.level === l).cls}" style="flex:${r[l]}" title="${l}: ${r[l]}"></span>` : '').join('')}</div></td></tr>`).join('') || '<tr><td colspan=10 class="mute">No open vulnerabilities in this scope.</td></tr>');
+    t.querySelectorAll('th[data-s]').forEach(h => h.onclick = () => { D.ui.groupSort = h.dataset.s; save(); drawBreakdown(); });
+    t.querySelectorAll('tr.clk').forEach(tr => tr.onclick = e => { if (e.target.closest('a')) return; location.hash = tr.dataset.href; });
+  }
+  function bindBreakdown() {
+    if (!$('#gBy')) return;
+    $('#gBy').onchange = e => { D.ui.groupBy = e.target.value; save(); const c = $('#gBy').closest('.card'); c.outerHTML = breakdownCard(); bindBreakdown(); };
+    $('#gScope').onchange = e => { D.ui.groupScope = e.target.value; save(); drawBreakdown(); };
+    drawBreakdown();
+  }
+  function connTile() {
+    const sa = siteAssets(), counts = {};
+    sa.forEach(a => { const k = a.conn && S.CONN_TYPES[a.conn.type] ? a.conn.type : ''; counts[k] = (counts[k] || 0) + 1; });
+    const order = ['internet', 'vendor', 'cellular', 'it', 'plant', 'cell', 'airgap', ''];
+    const max = Math.max(1, ...Object.values(counts));
+    const exposed = sa.filter(a => C.exposure(a)), unverified = sa.filter(a => a.conn && a.conn.type && !a.conn.verified).length;
+    return `<div class="card"><div class="row"><h2 style="margin:0">Assets by connectivity</h2>${tip('connectivity')}<a class="right" href="#/network">Network view →</a></div>
+      ${order.filter(k => counts[k]).map(k => { const t = S.CONN_TYPES[k]; return `<div class="row small" style="margin-top:4px"><span style="width:170px">${esc(t ? t.label : 'Not recorded')}</span><div class="bar" style="flex:1"><span style="width:${counts[k] / max * 100}%;background:${!t ? 'var(--line)' : t.r === 3 ? 'var(--crit)' : t.r === 2 ? 'var(--mod)' : 'var(--low)'}"></span></div><span style="width:24px;text-align:right">${counts[k]}</span></div>`; }).join('') || '<p class="mute small">No assets yet.</p>'}
+      ${exposed.length ? `<h3 style="color:#ffb3b5">⚠ Internet / remote-reachable (${exposed.length})</h3><ul class="small" style="margin:0;padding-left:18px">${exposed.map(a => `<li><a href="#/asset/${esc(a.id)}">${esc(a.name)}</a> – ${esc(C.exposure(a))}</li>`).join('')}</ul>` : '<p class="small" style="color:var(--low)">No internet- or vendor-remote-reachable assets recorded.</p>'}
+      ${counts[''] || unverified ? `<p class="small mute">${counts[''] ? counts[''] + ' asset(s) have no connectivity recorded. ' : ''}${unverified ? unverified + ' never verified.' : ''}</p>` : ''}</div>`;
+  }
+
+  // ---------- network view (zone → gateway → assets) ----------
+  function network() {
+    const sa = siteAssets(), sc = scored();
+    const worst = id => sc.filter(x => x.a.id === id && isActive(x))[0];
+    const only = D.ui.netExposedOnly;
+    const list = only ? sa.filter(a => C.exposure(a)) : sa;
+    const zones = C.topology(list);
+    const chip = a => { const w = worst(a.id), c = a.conn || {}; return `<div class="node ${C.exposure(a) ? 'exp' : ''}"><a href="#/asset/${esc(a.id)}"><b>${esc(a.name)}</b></a> <span class="mute small">${esc(a.type)}</span>
+      <div>${connChip(a)}${c.firewall === 'yes' ? ' <span class="tag" title="' + esc(c.fwNote || 'Firewall/ACL in front') + '">🛡 ACL</span>' : ''} ${w ? pill(w.r) : ''}</div>
+      <div class="small mute">${esc([c.vlan, c.switchPort, C.METHODS[c.method]].filter(Boolean).join(' · '))}</div>
+      ${(c.protocols || []).length ? `<div class="small">${c.protocols.map(p => `<span class="tag">${esc(p)}</span>`).join(' ')}</div>` : ''}
+      ${c.remote && !/^(none|n\/a|no)$/i.test(c.remote) ? `<div class="small" style="color:#ffb3b5">↗ remote: ${esc(c.remote)}</div>` : ''}</div>`; };
+    view(`<div class="row"><h1>Network view</h1>${tip('network')}<span class="mute">${esc(site().name)} · ${sa.length} assets</span>
+      <label class="switch right"><input type="checkbox" id="nx" ${only ? 'checked' : ''}> Only internet / remote-reachable</label></div>
+      <p class="small mute">Grouped by zone, then by the gateway or parent device each asset connects through. Colors show reachability: <span class="cchip r1">R 1 isolated</span> <span class="cchip r2">R 2 OT only</span> <span class="cchip r3">R 3 IT / internet / remote</span>. This is a record of what people entered, not a live scan.</p>
+      ${[...zones.entries()].sort((x, y) => x[0].localeCompare(y[0])).map(([z, gws]) => `<div class="card zone"><h2 style="margin-top:0">${esc(z)} <span class="mute small">${[...gws.values()].reduce((n, l) => n + l.length, 0)} assets</span></h2>
+        ${[...gws.entries()].map(([gw, as]) => { const ga = sa.find(x => x.name === gw); return `<div class="gw"><div class="gwh">⇄ ${ga ? `<a href="#/asset/${esc(ga.id)}">${esc(gw)}</a>` : esc(gw)}</div><div class="nodes">${as.map(chip).join('')}</div></div>`; }).join('')}</div>`).join('') || '<p class="mute">Nothing to show.</p>'}`);
+    $('#nx').onchange = e => { D.ui.netExposedOnly = e.target.checked; save(); network(); };
   }
 
   // ---------- alerts (feed matches) ----------
@@ -562,12 +712,12 @@
     const mat = matLevel(vs); const r = S.score(a, v), sla = S.slaFor(r.level, mat, v.found);
     const k = KEV[v.cve], ctl = G.isController(a);
     const advs = (v.advisories && v.advisories.length ? v.advisories : F.advisoriesFor(v.cve).map(x => ({ id: x.id, t: x.t, u: x.u }))).slice(0, 6);
-    const comps = G.compensating(a, v, r.level, mat || 'Reasonably');
+    const comps = G.compensating(a, Object.assign({}, v, { reach: r.reach }), r.level, mat || 'Reasonably');
     view(`<p><a href="#/asset/${esc(a.id)}">← ${esc(a.name)}</a></p>
       <div class="row"><h1>${esc(v.cve || 'Vulnerability')}</h1>${pill(r)}${v.kev ? '<span class="tag kev">KEV</span>' : ''}${v.rescored ? `<span class="tag chg">re-scored ${esc(v.rescored.at)}</span>` : ''}<span class="right row"><button id="ev">Edit</button><a class="btn" href="${calcFromVuln(a, v)}">Open in calculator</a></span></div>
       <p class="mute">${esc(v.title)}</p>
       <div class="grid g2"><div class="card small"><h3 style="margin-top:0">Why this score</h3><table class="break"><tr><td>Asset importance (AIS) ${tip('ais')}</td><td>${r.ais.score}</td></tr><tr><td>Severity (VSS, CVSS ${esc(v.cvss || '—')}) ${tip('vss')}</td><td>${r.vss.score}</td></tr>
-        <tr><td>Likelihood LF: ${esc(r.threat.why)}, reach ${r.reach} ${tip('lf')}</td><td>× ${r.lf}</td></tr><tr><td>Regulatory (RCIS) ${tip('rcis')}</td><td>× ${r.rcis}</td></tr><tr><td><b>Risk score</b>${r.floored ? ' (KEV floor)' : ''}</td><td>${r.score}</td></tr></table>
+        <tr><td>Likelihood LF: ${esc(r.threat.why)}, reach ${r.reach} ${tip('lf')}<div class="mute">Reach ${r.reach}: ${esc(r.reachWhy)}${r.reachSrc === 'connectivity' ? ` (<a href="#/asset/${esc(a.id)}">connectivity</a>)` : ''}</div></td><td>× ${r.lf}</td></tr><tr><td>Regulatory (RCIS) ${tip('rcis')}</td><td>× ${r.rcis}</td></tr><tr><td><b>Risk score</b>${r.floored ? ' (KEV floor)' : ''}</td><td>${r.score}</td></tr></table>
         <p>Status <b>${esc(v.status)}</b> ${tip('status')} · EPSS ${esc(v.epss === '' ? '—' : v.epss)} ${tip('epss')} · owner ${esc(v.owner || '—')}</p>
         <p>${sla.containBy ? `Contain by <b>${sla.containBy}</b> · ` : ''}${sla.remediateBy ? `Fix by <b>${sla.remediateBy}</b>` : 'Fix at lifecycle/next window'} <span class="mute">(${esc(r.level)} × ${esc(mat || 'Reasonably')} Secured)</span></p>${disc()}
         ${v.rescored ? `<p class="small">Re-scored ${esc(v.rescored.at)}: ${esc(v.rescored.why)} (${esc(v.rescored.fromLevel)} ${v.rescored.from} → ${esc(v.rescored.toLevel)} ${v.rescored.to}).</p>` : ''}</div>

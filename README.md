@@ -1,4 +1,4 @@
-# OT Risk: shop-floor vulnerability risk platform (v0.2 test build)
+# OT Risk: shop-floor vulnerability risk platform (v0.3 test build)
 
 OT Risk is a static single-page app that puts the **Securing the Shop Floor v2** framework into practice:
 
@@ -20,6 +20,8 @@ Use a web server (not `file://`) so the browser can load `data/*.json`. Without 
 ## Features
 | Area | What it does |
 |---|---|
+| **Dashboard: Top risks by** | A group-by selector over open risk: asset type, vendor/model, vendor, plant/site, region, Purdue level, zone/cell, production line, owner, KEV vs not, exploit status, connectivity. Sortable columns (counts per band, highest score, open, KEV, assets) and a stacked band bar. Click a row or a band count to open the **filtered register** (`#/register/scope=all&by=region&val=Central%20Region&level=High`). |
+| **Network connectivity** (per asset) | Connection type (air-gapped, isolated cell, plant OT, routed to IT, internet-reachable, cellular/modem, vendor remote access), method, switch/port, VLAN/subnet, gateway/parent device, remote access path, firewall/ACL + note, protocols, last-verified date. **Drives reachability R → LF**: air-gapped / isolated cell / USB-only = 1, plant OT = 2, IT-routed / internet / cellular / vendor remote / any remote path = 3 (IT-routed behind a firewall/ACL = 2). The reason shows in every score breakdown; a vulnerability can override it. Imports prefill it from IP and open ports and mark it **guess**. Dashboard tile by connection type with an exposed-asset list; **Network view** (`#/network`) groups assets by zone → gateway with exposure outlines. |
 | **Help** (`#/help`) | 10-step Getting Started guide (company/site setup, maturity wizard, adding and importing assets, vulnerabilities, feed alerts, reading the score, risk register, fixing, backup/restore) and a glossary (KEV, EPSS, CVSS, AIS, VSS, LF, RCIS, Purdue levels, FAIR, CSAF…). "?" tips on every screen. A self-checking **Start here** checklist on the dashboard. |
 | **Nightly feeds** | Header badge shows the feed date (green = fresh, amber = older than 3 days, orange = bundled snapshot). `data/` holds CISA KEV, FIRST EPSS (trimmed), and every CISA ICS advisory (CSAF) with vendor, products, versions, CVEs, CVSS and remediation text. |
 | **Alerts** (`#/alerts`) + **New since your last visit** | Assets are matched by vendor / model / firmware against the ICS advisories and KEV. Each result is a **possible match** with High/Medium/Low confidence and the reason ("model number 1756-EN2T appears in the advisory; firmware 10.010 is inside the affected range ≤ 11.002"). **Confirm** creates vulnerability records prefilled with CVE, CVSS, EPSS, KEV and the advisory link; **Dismiss** is remembered (with optional reason, undoable). Existing findings are **re-scored and flagged** when a CVE joins KEV or its EPSS crosses the threat threshold. |
@@ -32,6 +34,8 @@ Use a web server (not `file://`) so the browser can load `data/*.json`. Without 
 Default is **Use only nightly feeds**: the Look up button reads KEV, EPSS and CVSS from `data/`, so nothing about your equipment leaves the browser. Turning it off (Data screen) also queries `api.first.org` and `services.nvd.nist.gov` live, which reveals the CVE IDs you track to those services. The UI says which mode is on next to every Look up button.
 
 ### Imports
+CSV columns now also recognized: Line, VLAN/Subnet, Switch port, Gateway/Parent, Connection type, Connection method, Remote access, Protocols (`;`-separated).
+
 Recommended path: inventory/asset CSV exports from passive or vendor tools you already run (Claroty, Nozomi Networks, Dragos, Microsoft Defender for IoT, Tenable OT), switch ARP/MAC and CDP/LLDP tables, DHCP leases, PLC project I/O lists. Nmap XML is supported, but only from a scan with written OT/process-owner sign-off, inside a maintenance window, one host at a time, never during production.
 
 ## Nightly feed job
@@ -58,6 +62,7 @@ node tests/run-tests.js     # scoring worked examples, version-range parser, mat
 ```
 index.html, css/styles.css
 js/scoring.js     v2 scoring engine (Node + browser)
+js/connectivity.js  connectivity vocabularies, import prefill (guesses), exposure, zone/gateway topology (Node + browser)
 js/matcher.js     equipment ↔ advisory/KEV matcher, version-range parser, re-score diff (Node + browser)
 js/guidance.js    fix grouping + OT-safe compensating controls (Node + browser)
 js/feeds.js       loads data/*.json, falls back to js/kev-data.js
@@ -74,9 +79,12 @@ docs/RESEARCH.md, docs/COLLECTOR-SPEC.md
 ```
 
 ## Sample data
-**Northfield Air Systems (fictional)** is an HVAC-equipment maker with two plants and 21 assets. Company, sites, IPs, owners and dollar figures are invented; vendor/model names are real product lines so the feed matching has something to find.
+**Northfield Air Systems (fictional)** is an HVAC-equipment maker with two plants in two regions, 21 assets with production lines and recorded connectivity (two left blank on purpose), and 12 vulnerabilities. Company, sites, IPs, owners and dollar figures are invented; vendor/model names are real product lines so the feed matching has something to find.
 
-## Known limits (v0.2)
+## Known limits (v0.3)
+- **Connectivity is what people record, not a live map.** The network view draws only what was entered or imported; it can be out of date. Use "Mark verified today" and the last-verified date. Import guesses (from IP ranges and open ports) are marked and need a human check.
+- Reachability from connectivity is per asset; a single vulnerability that is only reachable locally (e.g. a USB-only bug) needs a manual override on that vulnerability.
+- A browser that already holds the untouched v0.2 sample plant is upgraded with regions, lines and connectivity on load; the three new Plant 1 sample vulnerabilities appear after **Data → Reload sample plant**.
 - **Matching is text-based and fuzzy.** It compares vendor, model and firmware strings to CISA's product lists. Expect some wrong "possible matches" and some misses, especially when the asset's model is a nickname or the advisory lists product families. Catalog numbers and exact firmware strings on assets make a big difference. Low-confidence matches are hidden by default.
 - **KEV has no version data,** so KEV-only matches (e.g. Microsoft Windows) are grouped and marked Low; tick only the CVEs that apply.
 - **EPSS is trimmed** to KEV/ICS CVEs and anything ≥ 0.10 to keep the download small. A CVE missing from the set is very likely < 0.10 (or enable live look-ups).

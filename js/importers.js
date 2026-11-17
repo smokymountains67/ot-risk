@@ -105,7 +105,15 @@
     firmware: ['firmware', 'firmware version', 'fw', 'version', 'os version'],
     type: ['type', 'asset type', 'device type', 'category', 'class'],
     purdue: ['purdue', 'purdue level', 'level'],
-    zone: ['zone', 'network zone', 'segment', 'vlan', 'cell', 'area', 'site area'],
+    zone: ['zone', 'network zone', 'segment', 'cell', 'area', 'site area'],
+    line: ['line', 'production line', 'process line'],
+    vlan: ['vlan', 'vlan id', 'subnet', 'network'],
+    switchPort: ['switch port', 'switch', 'switchport', 'port', 'access port'],
+    gateway: ['gateway', 'parent', 'parent device', 'connected via', 'upstream'],
+    connType: ['connection', 'connection type', 'connectivity', 'network type', 'exposure'],
+    method: ['connection method', 'media', 'link type', 'interface'],
+    remote: ['remote access', 'remote access path', 'remote'],
+    protocols: ['protocols', 'protocol', 'ot protocols', 'industrial protocols'],
     owner: ['owner', 'asset owner', 'responsible'],
     cve: ['cve', 'cves', 'cve id', 'vulnerabilities'],
   };
@@ -121,7 +129,8 @@
     if (idx.ip < 0 && idx.name < 0) throw new Error('CSV must have an IP or Name column. Found: ' + rows[0].join(', '));
     return rows.slice(1).map(r => {
       const get = k => idx[k] >= 0 ? (r[idx[k]] || '').trim() : '';
-      const a = { name: get('name') || get('ip'), ip: get('ip'), mac: get('mac'), vendor: get('vendor'), model: get('model'), firmware: get('firmware'), type: get('type') || 'Unknown', purdue: normPurdue(get('purdue')), zone: get('zone'), owner: get('owner'), notes: 'Imported from CSV', cves: (get('cve').match(/CVE-\d{4}-\d{4,}/gi) || []).map(x => x.toUpperCase()) };
+      const a = { name: get('name') || get('ip'), ip: get('ip'), mac: get('mac'), vendor: get('vendor'), model: get('model'), firmware: get('firmware'), type: get('type') || 'Unknown', purdue: normPurdue(get('purdue')), zone: get('zone') || get('vlan'), line: get('line'), owner: get('owner'), notes: 'Imported from CSV',
+        vlan: get('vlan'), switchPort: get('switchPort'), gateway: get('gateway'), connType: get('connType'), method: get('method'), remote: get('remote'), protocols: get('protocols').split(/[;,|]+/).map(x => x.trim()).filter(Boolean), cves: (get('cve').match(/CVE-\d{4}-\d{4,}/gi) || []).map(x => x.toUpperCase()) };
       if (!a.purdue) { a.purdue = 'L3'; a.purdueGuessed = true; }
       return a;
     });
@@ -130,7 +139,7 @@
   function parseCollectorJSON(text) {
     const j = JSON.parse(text);
     if (j.schema !== 'otrisk.collector.v1' || !Array.isArray(j.assets)) throw new Error('Expected {"schema":"otrisk.collector.v1","assets":[...]}');
-    return j.assets.map(x => ({ name: x.name || x.ip, ip: x.ip || '', mac: x.mac || '', vendor: x.vendor || '', model: x.model || '', firmware: x.firmware || '', type: x.type || 'Unknown', purdue: normPurdue(x.purdue) || 'L3', purdueGuessed: !x.purdue, zone: x.zone || '', notes: 'Collector ' + (j.collector && j.collector.id || '') + ' (' + (j.collector && j.collector.method || 'passive') + ') at ' + (j.collectedAt || ''), cves: x.cves || [] }));
+    return j.assets.map(x => ({ name: x.name || x.ip, ip: x.ip || '', mac: x.mac || '', vendor: x.vendor || '', model: x.model || '', firmware: x.firmware || '', type: x.type || 'Unknown', purdue: normPurdue(x.purdue) || 'L3', purdueGuessed: !x.purdue, zone: x.zone || '', ports: (x.ports || []).map(p => ({ port: +p.port || +p })), protocols: x.protocols || [], vlan: x.vlan || '', switchPort: x.switchPort || '', gateway: x.gateway || '', connType: x.connection || '', notes: 'Collector ' + (j.collector && j.collector.id || '') + ' (' + (j.collector && j.collector.method || 'passive') + ') at ' + (j.collectedAt || ''), cves: x.cves || [] }));
   }
   function detectAndParse(fileName, text) {
     const t = text.trim();

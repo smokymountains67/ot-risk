@@ -47,6 +47,34 @@
     Highly: 'Zone/conduit enforcement (IEC 62443-3-2), tuned passive OT detection, automated exception expiry and re-scoring on KEV/EPSS change.',
   };
 
+  // Network connectivity → reachability (R). The connectivity record on an asset drives R for all of
+  // its vulnerabilities unless a vulnerability carries a manual override (v.reachOverride).
+  const CONN_TYPES = {
+    airgap: { label: 'None / air-gapped', r: 1, why: 'not networked (air-gapped)' },
+    cell: { label: 'Isolated cell network', r: 1, why: 'isolated cell network with no route out' },
+    plant: { label: 'Plant OT network', r: 2, why: 'reachable only from inside the plant OT network' },
+    it: { label: 'Routed to IT / corporate', r: 3, why: 'routable from IT/corporate networks' },
+    internet: { label: 'Internet-reachable', r: 3, why: 'reachable from the internet', exposed: true },
+    cellular: { label: 'Cellular / modem', r: 3, why: 'has a cellular/modem link', exposed: true },
+    vendor: { label: 'Vendor remote access', r: 3, why: 'vendor remote access path', exposed: true },
+  };
+  function connReach(conn) {
+    if (!conn || !CONN_TYPES[conn.type]) return null;
+    const t = CONN_TYPES[conn.type];
+    let r = t.r, why = t.why;
+    const remote = String(conn.remote || '').trim();
+    if (conn.method === 'usb' && r > 1) { r = 1; why = 'USB-only, no network connection'; }
+    if (conn.type === 'it' && conn.firewall === 'yes') { r = 2; why = 'routed to IT, but a firewall/ACL limits it to named hosts' + (conn.fwNote ? ' (' + conn.fwNote + ')' : ''); }
+    if (remote && !/^(none|n\/a|no)$/i.test(remote) && r < 3) { r = 3; why = 'remote access path: ' + remote; }
+    return { r, why: t.label + ': ' + why, exposed: !!t.exposed || (r === 3 && !!remote && !/^(none|n\/a|no)$/i.test(remote) && conn.type !== 'it') };
+  }
+  function effectiveReach(asset, v) {
+    const c = !v.reachOverride && connReach(asset && asset.conn);
+    if (c) return { r: c.r, why: c.why, src: 'connectivity' };
+    const r = Math.min(3, Math.max(1, +v.reach || 2));
+    return { r, why: v.reachOverride ? 'set manually on this vulnerability' : 'set on the vulnerability (no connectivity recorded)', src: 'manual' };
+  }
+
   function maturityLevel(total) {
     if (!total) return null;
     return total <= 14 ? 'Poorly' : total <= 21 ? 'Reasonably' : 'Highly';
@@ -70,19 +98,19 @@
     return { t: 1, why: 'EPSS < 0.10, no known exploit' };
   }
   function band(score) { return BANDS.find(b => score >= b.min); }
-  // v: {cvss, kev, epss, publicExploit, reach(1-3), rcis}
+  // v: {cvss, kev, epss, publicExploit, reach(1-3), reachOverride?, rcis}; asset.conn (optional) drives reach
   function score(asset, v) {
     const a = ais(asset.crit || {}, asset.purdue);
     const s = vss(v.cvss);
     const th = threat(v.kev, v.epss, v.publicExploit);
-    const r = Math.min(3, Math.max(1, +v.reach || 2));
+    const er = effectiveReach(asset, v), r = er.r;
     const lf = LF_TABLE[th.t + r];
     const rcis = +v.rcis || 1.0;
     let raw = a.score * s.score * lf * rcis / 3.375;
     raw = Math.round(raw * 10) / 10;
     let b = band(raw), floored = false;
     if (v.kev && r >= 2 && raw < 30) { b = BANDS[1]; floored = true; }
-    return { ais: a, vss: s, threat: th, reach: r, lf, rcis, score: raw, level: b.level, cls: b.cls, floored };
+    return { ais: a, vss: s, threat: th, reach: r, reachWhy: er.why, reachSrc: er.src, lf, rcis, score: raw, level: b.level, cls: b.cls, floored };
   }
   function slaFor(level, maturity, foundISO) {
     const m = maturity || 'Reasonably';
@@ -105,6 +133,6 @@
     let sum = 0; for (const x of out) sum += x;
     return { p10: q(.1), p50: q(.5), p90: q(.9), mean: sum / n };
   }
-  g.OTScore = { PURDUE, AIS_CRITERIA, MATURITY_FACTORS, LF_TABLE, BANDS, SLA, COMP_CONTROLS, maturityLevel, ais, vss, threat, band, score, slaFor, ale };
+  g.OTScore = { PURDUE, AIS_CRITERIA, MATURITY_FACTORS, LF_TABLE, BANDS, SLA, COMP_CONTROLS, CONN_TYPES, connReach, effectiveReach, maturityLevel, ais, vss, threat, band, score, slaFor, ale };
   if (typeof module !== 'undefined') module.exports = g.OTScore;
 })(typeof window !== 'undefined' ? window : globalThis);
