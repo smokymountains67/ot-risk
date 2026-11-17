@@ -1,0 +1,57 @@
+name: Nightly threat feeds
+
+on:
+  schedule:
+    - cron: '17 9 * * *'   # 09:17 UTC daily (04:17 ET in winter)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: feeds
+  cancel-in-progress: false
+
+jobs:
+  build-feeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch CISA ICS advisories (CSAF, OT/white)
+        run: git clone --depth 1 --filter=blob:none --sparse https://github.com/cisagov/CSAF.git /tmp/csaf && git -C /tmp/csaf sparse-checkout set csaf_files/OT/white
+
+      - name: Build data/*.json (KEV, EPSS, ICS advisories)
+        run: node scripts/build-feeds.mjs --csaf /tmp/csaf --out data
+
+      - name: Tests
+        run: node tests/run-tests.js
+
+      - name: Commit if changed
+        id: commit
+        run: |
+          git config user.name "ot-risk-feeds[bot]"
+          git config user.email "ot-risk-feeds@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "No feed changes."; echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "Nightly feeds $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ask Pages to rebuild
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" || echo "Pages rebuild request failed; the push will still trigger a build."
+
+      - name: Summary
+        run: node -e "const m=require('./data/meta.json');console.log(JSON.stringify(m,null,1))" >> "$GITHUB_STEP_SUMMARY"
